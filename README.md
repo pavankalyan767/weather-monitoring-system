@@ -18,7 +18,7 @@ The Weather Monitoring System is a Django-based web application for monitoring w
 
 ### 1. Clone the Repository
 ```bash
-https://github.com/pavankalyan767/weather-monitoring-system.git
+git clone https://github.com/pavankalyan767/weather-monitoring-system.git
 cd weather_monitor
 ```
 ```bash
