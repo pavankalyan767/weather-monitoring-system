@@ -1,29 +1,54 @@
-# views.py
 from django.shortcuts import render
 from django.views.generic import TemplateView
 from django.http import JsonResponse
 from django.utils import timezone
 from datetime import timedelta
-from .models import City, WeatherData, DailyWeatherSummary, WeatherAlert
-
-
+from .models import City, WeatherData, DailyWeatherSummary
 import requests
 import os
 from dotenv import load_dotenv
-
-
+from django.db.models import Avg, Max, Min, Count
+from collections import Counter
 
 # Load environment variables
 load_dotenv()
 OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
 
-
-
-
-
-
-
-
+def update_daily_summary(city, date):
+    """Update daily weather summary for a given city and date"""
+    daily_data = WeatherData.objects.filter(
+        city=city,
+        timestamp__date=date
+    )
+    
+    if daily_data.exists():
+        # Calculate statistics
+        stats = daily_data.aggregate(
+            avg_temp=Avg('temperature'),
+            max_temp=Max('temperature'),
+            min_temp=Min('temperature')
+        )
+        
+        # Calculate dominant condition
+        conditions = daily_data.values_list('condition', flat=True)
+        condition_counts = Counter(conditions)
+        dominant_condition = max(condition_counts.items(), key=lambda x: x[1])[0]
+        
+        # Update or create daily summary
+        summary, created = DailyWeatherSummary.objects.update_or_create(
+            city=city,
+            date=date,
+            defaults={
+                'avg_temperature': stats['avg_temp'],
+                'max_temperature': stats['max_temp'],
+                'min_temperature': stats['min_temp'],
+                'dominant_condition': dominant_condition,
+                'condition_distribution': dict(condition_counts),
+                'sample_count': len(conditions)
+            }
+        )
+        return summary
+    return None
 
 def fetch_weather_data(request):
     """API endpoint to fetch updated weather data."""
@@ -45,26 +70,27 @@ def fetch_weather_data(request):
             response = requests.get(OPENWEATHER_URL, params={
                 'q': city.name,
                 'appid': OPENWEATHER_API_KEY,
-                'units': 'metric'  # Use 'imperial' for Fahrenheit
+                'units': 'metric'
             })
             
             if response.status_code == 200:
                 data = response.json()
-                temperature = data['main']['temp']
-                feels_like = data['main']['feels_like']
-                condition = data['weather'][0]['description']
-                
-                # Store the data in the database
                 weather = WeatherData.objects.create(
                     city=city,
-                    temperature=temperature,
-                    feels_like=feels_like,
-                    condition=condition
+                    temperature=data['main']['temp'],
+                    feels_like=data['main']['feels_like'],
+                    condition=data['weather'][0]['description'],
+                    humidity=data['main']['humidity'],
+                    wind_speed=data['wind']['speed']
                 )
+                
+                # Update daily summary
+                update_daily_summary(city, timezone.now().date())
             else:
                 print(f"Error fetching data for {city.name}: {response.status_code}")
-                continue  # Skip to the next city if there's an error
+                continue
 
+        # Prepare current weather data
         city_weather_data.append({
             'city': {
                 'id': city.id,
@@ -73,19 +99,23 @@ def fetch_weather_data(request):
             'temperature': weather.temperature,
             'feels_like': weather.feels_like,
             'condition': weather.condition,
+            'humidity': weather.humidity,
+            'wind_speed': weather.wind_speed,
             'timestamp': weather.timestamp.isoformat()
         })
         
-        # Get historical data for charts (last hour)
-        hour_ago = timezone.now() - timedelta(hours=1)
+        # Get historical data for charts (last 24 hours)
+        day_ago = timezone.now() - timedelta(hours=24)
         historical = WeatherData.objects.filter(
             city=city,
-            timestamp__gte=hour_ago
+            timestamp__gte=day_ago
         ).order_by('timestamp')
         
         historical_data[city.id] = [{
             'time': entry.timestamp.strftime('%H:%M'),
-            'temperature': entry.temperature
+            'temperature': entry.temperature,
+            'humidity': entry.humidity,
+            'wind_speed': entry.wind_speed
         } for entry in historical]
         
         # Get daily summary
@@ -98,57 +128,18 @@ def fetch_weather_data(request):
             daily_summaries[city.id] = {
                 'max_temperature': summary.max_temperature,
                 'min_temperature': summary.min_temperature,
-                'avg_temperature': summary.avg_temperature
+                'avg_temperature': summary.avg_temperature,
+                'dominant_condition': summary.dominant_condition,
+                'condition_distribution': summary.condition_distribution,
+                'sample_count': summary.sample_count
             }
     
-    # Get active alerts
-    active_alerts = [{
-        'city': {'id': alert.city.id, 'name': alert.city.name},
-        'message': alert.message,
-        'timestamp': alert.timestamp.isoformat()
-    } for alert in WeatherAlert.objects.filter(is_active=True)]
-    
     return JsonResponse({
-        'active_alerts': active_alerts,
         'city_weather_data': city_weather_data,
         'daily_summaries': daily_summaries,
         'historical_data': historical_data
     })
 
-
-
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-import json
-
-# A simple in-memory storage for alerts
-# In a production application, you might want to use a database model
-active_alerts = []
-import random
-def get_mock_current_temperature(city_id):
-    # Simulate getting the current temperature for a given city.
-    # In a real application, you would replace this with actual data fetching logic.
-    return random.uniform(15, 35)  # Random temperature between 15°C and 35°C
-
-from django.views.decorators.csrf import csrf_exempt
-import json
-
-@csrf_exempt  # Only use this for testing; consider CSRF protection for production
-def subscribe_alert(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            city_id = data.get('cityId')
-            threshold = data.get('threshold')
-
-            # Perform validation and subscription logic here
-            # ...
-
-            # Example of returning success
-            return JsonResponse({'success': True, 'alert': {'city_id': city_id, 'threshold': threshold}}, status=200)
-        except Exception as e:
-            return JsonResponse({'success': False, 'error': str(e)}, status=400)
-    return JsonResponse({'success': False, 'error': 'Invalid request method.'}, status=405)
 class DashboardView(TemplateView):
     template_name = 'weather/dashboard.html'
 
@@ -170,14 +161,5 @@ class DashboardView(TemplateView):
                 City.objects.get_or_create(**city_data)
             cities = City.objects.all()
 
-        # Fetch active alerts
-        active_alerts = WeatherAlert.objects.filter(is_active=True)
         context['cities'] = cities
-        context['active_alerts'] = active_alerts  # Add this line to include alerts
-
         return context
-
-
-
-
-

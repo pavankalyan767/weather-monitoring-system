@@ -8,146 +8,77 @@
 <div class="container">
     <h1 class="mb-4">Weather Monitoring System</h1>
 
-    <!-- Notifications Section -->
-    <div id="notification-container" class="mt-4"></div>
-
-    <!-- Alerts Section -->
-    <div id="alerts-container" class="mt-4">
-        <div class="alert alert-info">No active alerts at this time.</div>
-    </div>
-
-    <!-- Temperature Alert Subscription Form -->
-    <div class="mt-4">
-        <h3>Subscribe for Temperature Alerts</h3>
-        <form id="alert-subscription-form">
-            <div class="form-group">
-                <label for="city">Select City:</label>
-                <select class="form-control" id="city" required>
-                    {% for city in cities %}
-                    <option value="{{ city.id }}">{{ city.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="temperature-threshold">Temperature Threshold (°C):</label>
-                <input type="number" class="form-control" id="temperature-threshold" required>
-            </div>
-            <button type="submit" class="btn btn-primary">Subscribe</button>
-        </form>
-        <div id="subscription-message" class="mt-2"></div>
-    </div>
-
     <!-- Current Weather Cards -->
-    <div class="row mt-4" id="weather-cards">
-        <!-- Weather cards will be dynamically inserted here -->
-    </div>
+    <div class="row mt-4" id="weather-cards"></div>
 
     <!-- Summary Section -->
-    <h2 class="mt-5">Overall Daily Weather Summary</h2>
-    <div class="table-responsive">
-        <table class="table table-bordered" id="summary-table">
-            <thead>
-                <tr>
-                    <th>City</th>
-                    <th>High (°C)</th>
-                    <th>Low (°C)</th>
-                    <th>Average (°C)</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- Summary data will be dynamically inserted here -->
-            </tbody>
-        </table>
+    <div class="mt-5">
+        <h2>Daily Weather Summary</h2>
+        <div class="table-responsive">
+            <table class="table table-bordered" id="summary-table">
+                <thead>
+                    <tr>
+                        <th>City</th>
+                        <th>High (°C)</th>
+                        <th>Low (°C)</th>
+                        <th>Average (°C)</th>
+                        <th>Dominant Condition</th>
+                        <th>Samples</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Summary data will be dynamically inserted here -->
+                </tbody>
+            </table>
+        </div>
     </div>
 
-    <!-- Temperature Trends Charts -->
-    <h2 class="mt-5">Temperature Trends (Last Hour)</h2>
-    <div class="row mt-4" id="chart-container">
-        {% for city in cities %}
-        <div class="col-md-6 mb-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">{{ city.name }} - Temperature Trend</h5>
-                </div>
-                <div class="card-body">
-                    <canvas id="tempChart_{{ city.id }}"></canvas>
+    <!-- Weather Trends Charts -->
+    <div class="mt-5">
+        <h2>24-Hour Weather Trends</h2>
+        <div class="row mt-4" id="chart-container">
+            {% for city in cities %}
+            <div class="col-12 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">{{ city.name }} - Weather Trends</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="weatherChart_{{ city.id }}"></canvas>
+                    </div>
                 </div>
             </div>
+            {% endfor %}
         </div>
-        {% endfor %}
     </div>
 </div>
 
 <script>
-// Initialize variables
+// Initialize charts object
 const charts = {};
-const activeAlerts = []; // To store active alerts
 
-// Function to show notifications
-function showNotification(message, type = 'info') {
-    const notificationContainer = document.getElementById('notification-container');
-    const notification = document.createElement('div');
-    notification.className = `alert alert-${type} alert-dismissible fade show`;
-    notification.role = 'alert';
-    notification.innerHTML = `
-        ${message}
-        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
-            <span aria-hidden="true">&times;</span>
-        </button>
-    `;
-    notificationContainer.appendChild(notification);
-
-    // Auto-dismiss the notification after 5 seconds
-    setTimeout(() => {
-        notification.classList.remove('show');
-        notification.remove();
-    }, 5000);
-}
-
-// Function to create weather cards
+// Function to create weather cards with enhanced information
 function createWeatherCard(weather) {
+    const timeString = new Date(weather.timestamp).toLocaleTimeString();
     return `
         <div class="col-md-4 mb-4">
             <div class="card" id="weather_card_${weather.city.id}">
                 <div class="card-header">
                     <h5 class="card-title mb-0">${weather.city.name}</h5>
+                    <small class="text-muted">Last updated: ${timeString}</small>
                 </div>
                 <div class="card-body">
                     <h2 class="display-4">${weather.temperature.toFixed(1)}°C</h2>
-                    <p class="lead">${weather.condition}</p>
-                    <p class="feels_like">Feels like: ${weather.feels_like.toFixed(1)}°C</p>
+                    <p class="lead text-capitalize">${weather.condition}</p>
+                    <div class="weather-details">
+                        <p><i class="fas fa-thermometer-half"></i> Feels like: ${weather.feels_like.toFixed(1)}°C</p>
+                        <p><i class="fas fa-tint"></i> Humidity: ${weather.humidity}%</p>
+                        <p><i class="fas fa-wind"></i> Wind Speed: ${weather.wind_speed} m/s</p>
+                    </div>
                 </div>
             </div>
         </div>
     `;
-}
-
-// Function to update alerts
-function updateAlerts(alerts) {
-    const container = document.getElementById('alerts-container');
-    container.innerHTML = ''; // Clear previous alerts
-
-    if (alerts.length > 0) {
-        const alertsHtml = `
-            <div class="alert alert-warning" role="alert">
-                <h4 class="alert-heading">Active Weather Alerts</h4>
-                ${alerts.map(alert => {
-                    // Safe access with fallback values
-                    const cityName = alert.city?.name || 'Unknown City';
-                    const alertMessage = alert.message || 'No message provided';
-                    const alertTime = alert.timestamp ? new Date(alert.timestamp).toLocaleString() : 'Unknown time';
-                    
-                    return `<p>${cityName}: ${alertMessage} (${alertTime})</p>`;
-                }).join('')}
-            </div>
-        `;
-        container.innerHTML = alertsHtml; // Insert active alerts
-    } else {
-        container.innerHTML = '<div class="alert alert-info">No active alerts at this time.</div>';
-    }
-
-    // Debugging: Log the alerts to check their structure
-    console.log('Current Active Alerts:', alerts);
 }
 
 // Function to update weather cards
@@ -167,48 +98,106 @@ function updateSummaryTable(cities, summaries) {
                 <td>${summary.max_temperature?.toFixed(1) || 'N/A'}</td>
                 <td>${summary.min_temperature?.toFixed(1) || 'N/A'}</td>
                 <td>${summary.avg_temperature?.toFixed(1) || 'N/A'}</td>
+                <td class="text-capitalize">${summary.dominant_condition || 'N/A'}</td>
+                <td>${summary.sample_count || 0}</td>
             </tr>
         `;
     }).join('');
 }
 
-// Function to update or create a temperature chart
+// Function to update or create weather charts
 function updateOrCreateChart(cityId, historicalData) {
-    const ctx = document.getElementById(`tempChart_${cityId}`);
+    const ctx = document.getElementById(`weatherChart_${cityId}`);
     const times = historicalData.map(d => d.time);
     const temperatures = historicalData.map(d => d.temperature);
+    const humidity = historicalData.map(d => d.humidity);
+    const windSpeed = historicalData.map(d => d.wind_speed);
 
     if (charts[cityId]) {
         charts[cityId].data.labels = times;
         charts[cityId].data.datasets[0].data = temperatures;
+        charts[cityId].data.datasets[1].data = humidity;
+        charts[cityId].data.datasets[2].data = windSpeed;
         charts[cityId].update();
     } else {
         charts[cityId] = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: times,
-                datasets: [{
-                    label: 'Temperature (°C)',
-                    data: temperatures,
-                    borderColor: 'rgb(75, 192, 192)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    tension: 0.1,
-                    fill: true
-                }]
+                datasets: [
+                    {
+                        label: 'Temperature (°C)',
+                        data: temperatures,
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        yAxisID: 'y-temperature',
+                        fill: true
+                    },
+                    {
+                        label: 'Humidity (%)',
+                        data: humidity,
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        yAxisID: 'y-humidity',
+                        fill: true
+                    },
+                    {
+                        label: 'Wind Speed (m/s)',
+                        data: windSpeed,
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        yAxisID: 'y-wind',
+                        fill: true
+                    }
+                ]
             },
             options: {
                 responsive: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
                 plugins: {
                     legend: {
                         position: 'top',
+                    },
+                    title: {
+                        display: true,
+                        text: '24-Hour Weather Trends'
                     }
                 },
                 scales: {
-                    y: {
-                        beginAtZero: false,
+                    'y-temperature': {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
                         title: {
                             display: true,
                             text: 'Temperature (°C)'
+                        }
+                    },
+                    'y-humidity': {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                        title: {
+                            display: true,
+                            text: 'Humidity (%)'
+                        }
+                    },
+                    'y-wind': {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                        title: {
+                            display: true,
+                            text: 'Wind Speed (m/s)'
                         }
                     },
                     x: {
@@ -228,7 +217,6 @@ function updateDashboard() {
     fetch("{% url 'fetch_weather' %}")
         .then(response => response.json())
         .then(data => {
-            updateAlerts(data.active_alerts);
             updateWeatherCards(data.city_weather_data);
             updateSummaryTable(data.city_weather_data.map(w => w.city), data.daily_summaries);
             
@@ -237,37 +225,12 @@ function updateDashboard() {
                 updateOrCreateChart(cityId, historicalData);
             });
         })
-        .catch(error => console.error('Error updating dashboard:', error));
+        .catch(error => {
+            console.error('Error updating dashboard:', error);
+        });
 }
 
-// Handle alert subscription form submission
-document.getElementById('alert-subscription-form').addEventListener('submit', function(event) {
-    event.preventDefault();
-
-    const cityId = document.getElementById('city').value;
-    const threshold = document.getElementById('temperature-threshold').value;
-
-    fetch("{% url 'subscribe_alert' %}", {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ cityId, threshold }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            activeAlerts.push(data.alert); // Store the new alert
-            showNotification('Subscribed to temperature alerts!', 'success');
-            document.getElementById('subscription-message').textContent = 'Successfully subscribed!';
-        } else {
-            showNotification('Failed to subscribe: ' + data.message, 'danger');
-        }
-    })
-    .catch(error => console.error('Error subscribing to alerts:', error));
-});
-
-// Initial dashboard load
+// Initial dashboard load and refresh interval
 updateDashboard();
 setInterval(updateDashboard, 60000); // Refresh every minute
 </script>
